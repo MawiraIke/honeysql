@@ -13,6 +13,135 @@
          (sut/format {:select [:*] :from [:table] :where [:= :id 1]}
                      {:dialect :mysql}))))
 
+(deftest clickhouse-tests
+  (is (= ["SELECT * FROM table WHERE id = 1"]
+         (sut/format {:select [:*] :from [:table] :where [:= :id 1]}
+                     {:dialect :clickhouse
+                      :inline  true})))
+  (is (= ["SELECT number FROM numbers(20) WHERE y IS NULL"]
+         (-> (h/select :number)
+             (h/from :%numbers.20)
+             (h/where [:is :y nil])
+             (sut/format {:dialect :clickhouse
+                          :inline  true}))))
+  (is (= ["SELECT number FROM numbers(20) WHERE (type = 'sale') AND (productid = 123)"]
+         (-> (h/select :number)
+             (h/from :%numbers.20)
+             (h/where (sut/map= {:type "sale" :productid 123}))
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT number FROM numbers(20) WHERE (type = 'sale') AND (productid = 123) UNION SELECT number FROM numbers(20) WHERE (type = 'sale') AND (productid = 123)"]
+         (-> (h/union
+               (-> (h/select :number)
+                   (h/from :%numbers.20)
+                   (h/where (sut/map= {:type "sale" :productid 123})))
+               (-> (h/select :number)
+                   (h/from :%numbers.20)
+                   (h/where (sut/map= {:type "sale" :productid 123}))))
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT number FROM numbers(20) WHERE (type = 'sale') AND (productid = 123) UNION ALL SELECT number FROM numbers(20) WHERE (type = 'sale') AND (productid = 123)"]
+         (-> (h/union-all
+               (-> (h/select :number)
+                   (h/from :%numbers.20)
+                   (h/where (sut/map= {:type "sale" :productid 123})))
+               (-> (h/select :number)
+                   (h/from :%numbers.20)
+                   (h/where (sut/map= {:type "sale" :productid 123}))))
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT year, month, day, count(*) FROM t GROUP BY y"]
+         (-> (h/select :year :month :day :%count.*)
+             (h/from :t)
+             (h/group-by :y)
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT year, month, day, count(*) FROM t GROUP BY ROLLUP(year, month, day)"]
+         (-> (h/select :year :month :day :%count.*)
+             (h/from :t)
+             (h/group-by [:ROLLUP :year :month :day])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT * FROM t LIMIT 10"]
+         (-> (h/select :*)
+             (h/from :t)
+             (h/limit 10)
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT * FROM t LIMIT 2, 10"]
+         (-> (h/select :*)
+             (h/from :t)
+             (h/limit [2 10])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT * FROM t LIMIT 2, 10 WITH TIES"]
+         (-> (h/select :*)
+             (h/from :t)
+             (h/limit [2 10 :with-ties])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT year, month, day, count(*) FROM t ORDER BY y ASC"]
+         (-> (h/select :year :month :day :%count.*)
+             (h/from :t)
+             (h/order-by :y)
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT year, month, day, count(*) FROM t ORDER BY y DESC"]
+         (-> (h/select :year :month :day :%count.*)
+             (h/from :t)
+             (h/order-by [:y :desc])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["CREATE TABLE IF NOT EXISTS t (a String, b String, c String) ORDER BY (b,DESC)"]
+         (-> (h/create-table :t :if-not-exists)
+             (h/with-columns
+               [[:a :String]
+                [:b :String]
+                [:c :String]])
+             (h/order-by [:b :desc])
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE TABLE IF NOT EXISTS t (a String, b String, c String) PARTITION BY b"]
+         (-> (h/create-table :t :if-not-exists)
+             (h/with-columns
+               [[:a :String]
+                [:b :String]
+                [:c :String]])
+             (h/partition-by :b)
+             (format {:dialect :clickhouse}))))
+  (is (= ["PREWHERE v.b IN (SELECT a, b FROM table WHERE d = e)"]
+         (-> (h/prewhere :v.b
+                         (-> (h/select :a :b)
+                             (h/from :table)
+                             (h/where [:= :d :e])))
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT u.username, s.name FROM user AS u LEFT JOIN status AS s ON u.statusid = s.id WHERE s.id = 2"]
+         (-> (h/select :u.username :s.name)
+             (h/from [:user :u])
+             (h/left-join [:status :s] [:= :u.statusid :s.id])
+             (h/where [:= :s.id 2])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SELECT u.username, s.name FROM user AS u INNER JOIN status AS s ON u.statusid = s.id WHERE s.id = 2"]
+         (-> (h/select :u.username :s.name)
+             (h/from [:user :u])
+             (h/join [:status :s] [:= :u.statusid :s.id])
+             (h/where [:= :s.id 2])
+             (format {:dialect :clickhouse
+                      :inline  true}))))
+  (is (= ["SAMPLE 0.2"]
+         (-> (h/sample 0.2)
+             (format {:dialect :clickhouse}))))
+  (is (= ["SAMPLE 0.2 OFFSET 0.4"]
+         (-> (h/sample [0.2 0.4])
+             (format {:dialect :clickhouse}))))
+  (is (= ["LIMIT ? BY id" 2]
+         (-> (h/limit-by 2 :id)
+             (format {:dialect :clickhouse}))))
+  (is (= ["LIMIT ?, ? BY id" 2 10]
+         (-> (h/limit-by [2 10] :id)
+             (format {:dialect :clickhouse})))))
+
 (deftest expr-tests
   ;; special-cased = nil:
   (is (= ["id IS NULL"]

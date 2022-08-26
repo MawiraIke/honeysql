@@ -57,10 +57,12 @@
    :into :bulk-collect-into
    :insert-into :update :delete :delete-from :truncate
    :columns :set :from :using
+   :sample
    :join-by
    :join :left-join :right-join :inner-join :outer-join :full-join
    :cross-join
-   :where :group-by :having
+   :prewhere
+   :where :group-by :limit-by :having
    :window :partition-by
    :order-by :limit :offset :fetch :for :lock :values
    :on-conflict :on-constraint :do-nothing :do-update-set :on-duplicate-key-update
@@ -96,14 +98,15 @@
 
 (def ^:private dialects
   (atom
-   (reduce-kv (fn [m k v]
-                (assoc m k (assoc v :dialect k)))
-              {}
-              {:ansi      {:quote #(strop \" % \")}
-               :sqlserver {:quote #(strop \[ % \])}
-               :mysql     {:quote #(strop \` % \`)
-                           :clause-order-fn #(add-clause-before % :set :where)}
-               :oracle    {:quote #(strop \" % \") :as false}})))
+    (reduce-kv (fn [m k v]
+                 (assoc m k (assoc v :dialect k)))
+               {}
+               {:ansi       {:quote #(strop \" % \")}
+                :sqlserver  {:quote #(strop \[ % \])}
+                :mysql      {:quote           #(strop \` % \`)
+                             :clause-order-fn #(add-clause-before % :set :where)}
+                :oracle     {:quote #(strop \" % \") :as false}
+                :clickhouse {:quote #(strop "" % "")}})))
 
 ; should become defonce
 (def ^:private default-dialect (atom (:ansi @dialects)))
@@ -150,6 +153,11 @@
   "Helper to detect if SQL Server is the current dialect."
   []
   (= :sqlserver (:dialect *dialect*)))
+
+(defn- clickhouse?
+  "Helper to detect if Clickhouse is the current dialect."
+  []
+  (= :clickhouse (:dialect *dialect*)))
 
 ;; String.toUpperCase() or `str/upper-case` for that matter converts the
 ;; string to uppercase for the DEFAULT LOCALE. Normally this does what you'd
@@ -302,7 +310,9 @@
     (cond (= \% (first c))
           (let [[f & args] (str/split (subs c 1) #"\.")
                 quoted-args (map #(format-entity (keyword %) opts) args)]
-            [(str (upper-case (str/replace f "-" "_"))
+            [(str (if (clickhouse?)
+                    (str/replace f "-" "_")
+                    (upper-case (str/replace f "-" "_")))
                   "(" (str/join ", " quoted-args) ")")])
           (= \? (first c))
           (let [k (keyword (subs c 1))]
@@ -527,11 +537,18 @@
   (let [[sqls params]
         (reduce-sql (map (fn [[x expr]]
                            (let [[sql & params]   (format-with-part x)
-                                 [sql' & params'] (format-dsl expr)]
-                         ;; according to docs, CTE should _always_ be wrapped:
-                             (cond-> [(str sql " AS " (str "(" sql' ")"))]
-                               params  (into params)
-                               params' (into params'))))
+                                 [sql' & params'] (if (and (clickhouse?)
+                                                           (not (map? expr)))
+                                                    (format-expr expr)
+                                                    (format-dsl expr))]
+                             ;; according to docs, CTE should _always_ be wrapped:
+                             (cond-> [(if (clickhouse?)
+                                        (if (map? expr)
+                                          (str (str "(" sql' ")") " AS " sql)
+                                          (str sql' " AS " sql))
+                                        (str sql " AS " (str "(" sql' ")")))]
+                                     params  (into params)
+                                     params' (into params'))))
                          xs))]
     (into [(str (sql-kw k) " " (str/join ", " sqls))] params)))
 
@@ -654,6 +671,63 @@
       (into [(str (sql-kw k) " " sql)] params))
     []))
 
+(defn format-prewhere
+  "Given a sequence with two arguments where the first is a single argument or a
+  sequence of arguments for the prewhere clause and the second is a hash map
+  representing a SQL statement."
+  [k [xs dsl]]
+  (let [[sql params] (format-dsl dsl)]
+    (into [(str (sql-kw k)
+                (if (sequential? xs)
+                  (str "("
+                       (reduce (fn [ret x]
+                                 (if (clojure.string/blank? ret)
+                                   (name x)
+                                   (str ret ", " (name x)))) "" xs)
+                       ")")
+                  (str " " (name xs)))
+                " IN "
+                "(" sql ")")])))
+
+(defn- format-sample
+  "Given x, a fraction/number or a sequence with two arguments,
+  where the first is the fraction of data where the query is executed
+  and, the second is the offset which is applied as a fraction before
+  the data."
+  [k [x]]
+  (if (sequential? x)
+    (let [[n m] x]
+      (into [(str (sql-kw k) " " n " OFFSET " (or m 0))]))
+    (into [(str (sql-kw k) " " x)])))
+
+(defn- format-clickhouse-on-expr
+  "This function receives arguments similar to `format-selects` and
+  returns an almost equal result but allows extra modifiers which are
+  conjoined to the result."
+  [k e]
+  (if (or (not (sequential? e)) (seq e))
+    (let [extra-mods?    (when (and (sequential? e) (= (count e) 3)) (last e))
+          e              (if extra-mods? (butlast e) e)
+          [sql & params] (format-expr e)
+          plain-sql      (if (sequential? e) (subs sql 1 (dec (count sql))) sql)]
+      (into [(str (sql-kw k)
+                  " "
+                  plain-sql
+                  (if extra-mods?
+                    (str " " (sql-kw extra-mods?))
+                    ""))] params))
+    []))
+
+(defn- format-limit-by [k xs]
+  (let [[e by] xs
+        [sql & params] (format-clickhouse-on-expr :limit e)]
+    (when (nil? by)
+      (throw (ex-info "limit by expects an expression"
+                      {:first (first xs)})))
+    (if (sequential? by)
+      (into [(str sql " BY " (clojure.string/join ", " (map name by)))] params)
+      (into [(str sql " BY " (name by))] params))))
+
 (defn- format-group-by [k xs]
   (let [[sqls params] (format-expr-list xs)]
     (into [(str (sql-kw k) " " (str/join ", " sqls))] params)))
@@ -665,6 +739,22 @@
     (into [(str (sql-kw k) " "
                 (str/join ", " (map (fn [sql dir]
                                       (str sql " " (sql-kw (or dir :asc))))
+                                    sqls
+                                    dirs)))] params)))
+
+(defn- format-clickhouse-create-table-order-by
+  "Receives arguments identical to `format-order-by`.`format-order-by` is not extensible
+  and therefore cannot receive an extra option/setting when we want the results
+  to be enclosed in brackets."
+  [k xs]
+  (let [dirs (map #(when (sequential? %) (second %)) xs)
+        [sqls params]
+        (format-expr-list (map #(if (sequential? %) (first %) %) xs))]
+    (into [(str (sql-kw k) " "
+                (str/join ", " (map (fn [sql dir]
+                                      (if dir
+                                        (str "(" sql "," (sql-kw dir) ")")
+                                        (str sql)))
                                     sqls
                                     dirs)))] params)))
 
@@ -904,8 +994,9 @@
   (str/join " " (cons (format-simple-expr (first xs) "column operation")
                       (map #(binding [*formatted-column* (atom false)]
                               (cond-> (format-simple-expr % "column operation")
-                                (not @*formatted-column*)
-                                (upper-case)))
+                                      (and (not @*formatted-column*)
+                                           (not (clickhouse?)))
+                                      (upper-case)))
                            (rest xs)))))
 
 (defn- format-table-columns [_ xs]
@@ -1013,6 +1104,7 @@
          :set             #'format-set-exprs
          :from            #'format-selects
          :using           #'format-selects
+         :sample          #'format-sample
          :join-by         #'format-join-by
          :join            #'format-join
          :left-join       #'format-join
@@ -1021,13 +1113,18 @@
          :outer-join      #'format-join
          :full-join       #'format-join
          :cross-join      #'format-selects
+         :prewhere        #'format-prewhere
          :where           #'format-on-expr
          :group-by        #'format-group-by
+         :limit-by        #'format-limit-by
          :having          #'format-on-expr
          :window          #'format-selector
          :partition-by    #'format-selects
          :order-by        #'format-order-by
-         :limit           #'format-on-expr
+         :limit           (fn [_ x]
+                            (if (clickhouse?)
+                              (format-clickhouse-on-expr :limit x)
+                              (format-on-expr :limit x)))
          :offset          (fn [_ x]
                             (if (or (contains-clause? :fetch) (sql-server?))
                               (let [[sql & params] (format-on-expr :offset x)
@@ -1081,8 +1178,12 @@
                                    xs
                                    (let [s (kw->sym k)]
                                      (get leftover s)))]
-                      (let [formatter (k @clause-format)
-                            [sql' & params'] (formatter k xs)]
+                      (let [clickhouse-order-by?  (and (= k :order-by) (clickhouse?) (contains? statement-map :create-table))
+                            formatter             (if clickhouse-order-by?
+                                                    format-clickhouse-create-table-order-by ;; 'order-by' in clickhouse
+                                                    ;; has different formats in 'create-table' and 'select'
+                                                    (k @clause-format))
+                            [sql' & params']      (formatter k xs)]
                         [(conj sql sql')
                          (if params' (into params params') params)
                          (dissoc leftover k (kw->sym k))])
@@ -1418,7 +1519,9 @@
                   :else
                   (let [args          (rest expr)
                         [sqls params] (format-expr-list args)]
-                    (into [(str (sql-kw op)
+                    (into [(str (if (clickhouse?)
+                                  (name op)
+                                  (sql-kw op))
                                 (if (and (= 1 (count args))
                                          (map? (first args))
                                          (= 1 (count sqls)))

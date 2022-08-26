@@ -552,6 +552,23 @@
   [& args]
   (generic :using args))
 
+(defn sample
+  "Accepts similar arguments to `select` as part of
+  a Clickhouse Sample clause. Instead of keywords for
+  table names like in select, the arguments should be
+  decimals or a number.
+
+  (format-sample :sample 0.2)
+  (format-sample :sample 100000)
+  (format-sample :sample [0.2 0.4])
+
+  Produces:
+  SAMPLE 0.2
+  SAMPLE 100000
+  SAMPLE 0.2 OFFSET 0.4"
+  [& args]
+  (generic :sample args))
+
 (defn join-by
   "Accepts a sequence of join clauses to be generated
   in a specific order.
@@ -678,6 +695,22 @@
   [& args]
   (generic :cross-join args))
 
+(defn prewhere
+  "Accepts a Clickhouse database pre-where expression.
+  An expression is specified as a pair of arguments,
+  where the first one is the column name (or a sequence of
+  column names) and the second one is a hash map representing
+  a SQL statement:
+
+  (prewhere [:v.a :v.b] {:select [:a :b], :from [:table], :where [:= :camp :que]})
+  (prewhere :v.a {:select [:a], :from [:table], :where [:= :camp :que]})
+
+  Produces:
+  PREWHERE(v.a, v.b) IN (SELECT a, b FROM table WHERE camp = que)
+  PREWHERE v.a IN (SELECT a FROM table WHERE camp = que)"
+  [& exprs]
+  (generic :prewhere exprs))
+
 (defn where
   "Accepts one or more SQL expressions (conditions) and
   combines them with AND (by default):
@@ -776,15 +809,41 @@
   Produces: LIMIT ?
   Parameters: 40
 
-  The two-argument syntax is not supported: use `offset`
-  instead:
+  The two-argument syntax is not supported unless using Clickhouse:
+  use `offset` instead:
 
   `LIMIT 20,10` is equivalent to `LIMIT 10 OFFSET 20`
 
-  (-> (limit 10) (offset 20))"
+  (-> (limit 10) (offset 20))
+
+  For clickhouse dialect:
+  (limit [2, 10 :with-ties])
+
+  Produces: LIMIT 2, 10 WITH TIES
+  Parameters: 2, 10
+  "
   {:arglists '([limit])}
   [& args]
   (generic-1 :limit args))
+
+(defn limit-by
+  "Specific to Clickhouse,
+  accepts a single SQL expression:
+
+  (limit-by 40 :id)
+  (limit-by [10, 40] :id)
+  (limit-by [10, 40] [:id :ds])
+
+  Produces:
+   LIMIT 40 BY id
+   LIMIT 10, 40 BY id
+   LIMIT 10, 40 BY id, ds
+  Parameters:
+   40
+   10, 40"
+  ;{:arglists '([limit-by])}
+  [& args]
+  (generic :limit-by args))
 
 (defn offset
   "Accepts a single SQL expression:
