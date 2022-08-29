@@ -140,6 +140,18 @@
              (format {:dialect :clickhouse}))))
   (is (= ["LIMIT ?, ? BY id" 2 10]
          (-> (h/limit-by [2 10] :id)
+             (format {:dialect :clickhouse}))))
+  (is (= ["FETCH FIRST ? ROWS WITH TIES" 10]
+         (-> (h/fetch [10 :with-ties])
+             (format {:dialect :clickhouse}))))
+  (is (= ["FORMAT CSV"]
+         (-> (h/clickhouse-format :csv)
+             (format {:dialect :clickhouse}))))
+  (is (= ["INTO OUTFILE file"]
+         (-> (h/into-outfile :file)
+             (format {:dialect :clickhouse}))))
+  (is (= ["INTO OUTFILE file COMPRESSION gzip LEVEL 1"]
+         (-> (h/into-outfile :file {:compression :gzip :level 1})
              (format {:dialect :clickhouse})))))
 
 (deftest expr-tests

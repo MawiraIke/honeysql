@@ -862,7 +862,17 @@
   (fetch 10)
 
   Produces: FETCH ? ONLY
-  Parameters: 10"
+  Parameters: 10
+
+  When using the Clickhouse dialect, the expression provided can be a
+  vector which contains a number as the first item and a key as the second.
+  The second expression, a modifier replaces the `only` option.
+
+  (fetch [10 :rows-with-ties])
+
+  Produces: FETCH ? ONLY
+  Parameters: 10
+  "
   {:arglists '([limit])}
   [& args]
   (generic-1 :fetch args))
@@ -1072,6 +1082,32 @@
                                {:fields do-update-set
                                 :where  where}
                                do-update-set))))))
+
+(defn into-outfile
+  "Accepts one or more expressions to format to into outfile clause
+  for clickhouse.
+
+  The first argument is the filename while the second is a map that
+  receives extra options, namely the compression type and level.
+
+  (into-outfile :file)
+  (into-outfile :file {:compression :gzip :level 1})
+
+  Produces:
+  INTO OUTFILE file
+  INTO OUTFILE file COMPRESSION gzip LEVEL 1"
+  [& args]
+  (generic :into-outfile args))
+
+(defn clickhouse-format
+  "Accepts one expression.
+
+  (format :CSV)
+
+  Produces:
+  FORMAT CSV"
+  [& args]
+  (generic-1 :clickhouse-format args))
 
 (defn generic-helper-variadic
   "Most clauses that accept a sequence of items can be implemented

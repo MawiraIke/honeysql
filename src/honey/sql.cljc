@@ -67,7 +67,9 @@
    :order-by :limit :offset :fetch :for :lock :values
    :on-conflict :on-constraint :do-nothing :do-update-set :on-duplicate-key-update
    :returning
-   :with-data])
+   :with-data
+   :into-outfile
+   :clickhouse-format])
 
 (defn add-clause-before
   "Low-level helper just to insert a new clause.
@@ -735,26 +737,16 @@
 (defn- format-order-by [k xs]
   (let [dirs (map #(when (sequential? %) (second %)) xs)
         [sqls params]
-        (format-expr-list (map #(if (sequential? %) (first %) %) xs))]
+        (format-expr-list   (map #(if (sequential? %) (first %) %) xs))
+        clickhouse-variant? (and (clickhouse?) (contains-clause? :create-table))];; 'order-by' in clickhouse
+    ;; has different formats in 'create-table' and 'select'
     (into [(str (sql-kw k) " "
                 (str/join ", " (map (fn [sql dir]
-                                      (str sql " " (sql-kw (or dir :asc))))
-                                    sqls
-                                    dirs)))] params)))
-
-(defn- format-clickhouse-create-table-order-by
-  "Receives arguments identical to `format-order-by`.`format-order-by` is not extensible
-  and therefore cannot receive an extra option/setting when we want the results
-  to be enclosed in brackets."
-  [k xs]
-  (let [dirs (map #(when (sequential? %) (second %)) xs)
-        [sqls params]
-        (format-expr-list (map #(if (sequential? %) (first %) %) xs))]
-    (into [(str (sql-kw k) " "
-                (str/join ", " (map (fn [sql dir]
-                                      (if dir
-                                        (str "(" sql "," (sql-kw dir) ")")
-                                        (str sql)))
+                                      (if clickhouse-variant?
+                                        (if dir
+                                          (str "(" sql "," (sql-kw dir) ")")
+                                          (str sql))
+                                        (str sql " " (sql-kw (or dir :asc)))))
                                     sqls
                                     dirs)))] params)))
 
@@ -1133,8 +1125,16 @@
                               ;; format in the old style:
                               (format-on-expr :offset x)))
          :fetch           (fn [_ x]
-                            (let [which (if (contains-clause? :offset) :fetch-next :fetch-first)
-                                  rows  (if (and (number? x) (== 1 x)) :row-only :rows-only)
+                            (let [with-mod? (when (and (clickhouse?) (sequential? x)) (last x))
+                                  _         (when (and with-mod? (or (not (keyword? with-mod?)) (not= (count x) 2)))
+                                              (throw (ex-info (str "Modifier provided should be a keyword, not " with-mod?)
+                                                              {})))
+                                  x         (if with-mod? (first x) x)
+                                  which     (if (contains-clause? :offset) :fetch-next :fetch-first)
+                                  rows      (cond
+                                              with-mod?                  :rows-with-ties
+                                              (and (number? x) (== 1 x)) :row-only
+                                              :else                      :rows-only)
                                   [sql & params] (format-on-expr which x)]
                               (into [(str sql " " (sql-kw rows))] params)))
          :for             #'format-lock-strength
@@ -1147,7 +1147,17 @@
          ;; MySQL-specific but might as well be always enabled:
          :on-duplicate-key-update #'format-do-update-set
          :returning       #'format-selects
-         :with-data       #'format-with-data}))
+         :with-data       #'format-with-data
+         :into-outfile    (fn [_ [file-name {:keys [compression level]}]]
+                            [(str (sql-kw :into-outfile) " " (name file-name)
+                                  (if compression
+                                    (str " COMPRESSION " (name compression))
+                                    "")
+                                  (if level
+                                    (str " LEVEL " level)
+                                    ""))])
+         :clickhouse-format  (fn [_ x]
+                               [(str (sql-kw :format) " " (sql-kw x))])}))
 
 (assert (= (set @base-clause-order)
            (set @current-clause-order)
@@ -1178,12 +1188,8 @@
                                    xs
                                    (let [s (kw->sym k)]
                                      (get leftover s)))]
-                      (let [clickhouse-order-by?  (and (= k :order-by) (clickhouse?) (contains? statement-map :create-table))
-                            formatter             (if clickhouse-order-by?
-                                                    format-clickhouse-create-table-order-by ;; 'order-by' in clickhouse
-                                                    ;; has different formats in 'create-table' and 'select'
-                                                    (k @clause-format))
-                            [sql' & params']      (formatter k xs)]
+                      (let [formatter        (k @clause-format)
+                            [sql' & params'] (formatter k xs)]
                         [(conj sql sql')
                          (if params' (into params params') params)
                          (dissoc leftover k (kw->sym k))])
