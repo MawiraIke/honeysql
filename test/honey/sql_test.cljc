@@ -152,6 +152,66 @@
              (format {:dialect :clickhouse}))))
   (is (= ["INTO OUTFILE file COMPRESSION gzip LEVEL 1"]
          (-> (h/into-outfile :file {:compression :gzip :level 1})
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE DATABASE database ON CLUSTER cluster ENGINE = memory() COMMENT Comment"]
+         (-> (h/create-database :database)
+             (h/on-cluster :cluster)
+             (h/engine [:memory ])
+             (h/clickhouse-comment "Comment")
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE MATERIALIZED VIEW IF NOT EXISTS table-name ON CLUSTER cluster TO db.name ENGINE = engine POPULATE AS SELECT * FROM city"]
+         (-> (h/create-materialized-view
+               :table-name
+               :if-not-exists
+               (-> (h/on-cluster :cluster)
+                   (h/to-name :db.name)
+                   (h/engine :engine)
+                   (h/populate)))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE LIVE VIEW table-name WITH REFRESH 234 AS SELECT * FROM city"]
+         (-> (h/create-live-view
+               :table-name
+               (h/with-refresh :234))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE LIVE VIEW table-name WITH TIMEOUT 234 AS SELECT * FROM city"]
+         (-> (h/create-live-view
+               :table-name
+               (h/with-timeout :234))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE LIVE VIEW table-name WITH TIMEOUT 456 AND REFRESH 234 AS SELECT * FROM city"]
+         (-> (h/create-live-view
+               :table-name
+               (-> (h/with-refresh :234) (h/with-timeout :456)))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE LIVE VIEW db.live_view EVENTS AS SELECT * FROM city"]
+         (-> (h/create-live-view :db.live_view (h/events))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["WATCH db.live_view EVENTS LIMIT 10 FORMAT CSV"]
+         (-> (h/watch :db.live_view)
+             (h/events)
+             (h/limit 10)
+             (h/clickhouse-format :CSV)
+             (format {:dialect :clickhouse :inline true}))))
+  (is (= ["CREATE WINDOW VIEW IF NOT EXISTS db.live_view TO db.table_name INNER ENGINE = engine ENGINE = engine WATERMARK = strategy ALLOWED_LATENESS = interval POPULATE AS SELECT * FROM city"]
+         (-> (h/create-window-view
+               :db.live_view
+               :if-not-exists
+               (-> (h/to-name :db.table_name)
+                   (h/inner-engine :engine)
+                   (h/engine :engine)
+                   (h/watermark :strategy)
+                   (h/allowed-lateness :interval)
+                   (h/populate)))
+             (h/select :*) (h/from :city)
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE FUNCTION name ON CLUSTER cluster AS (x, k, b) -> k*x + b"]
+         (-> (h/create-function :name (h/on-cluster :cluster))
+             (assoc :raw ["(x, k, b)" " -> " "k*x + b"])
              (format {:dialect :clickhouse})))))
 
 (deftest expr-tests

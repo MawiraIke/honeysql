@@ -236,6 +236,137 @@
   [& args]
   (generic-1 :rename-table args))
 
+(defn create-database
+  "Accepts a database name to create and optionally a
+  flag to trigger IF NOT EXISTS in the SQL:
+
+  (create-database :foo)
+  (create-database :foo :if-not-exists)"
+  [& args]
+  (generic :create-database args))
+
+(defn on-cluster
+  "Accepts one expression to create Clickhouse ON CLUSTER clause.
+
+  (on-cluster :cluster)
+
+  Produces:
+  ON CLUSTER cluster"
+  [& args]
+  (generic-1 :on-cluster args))
+
+(defn to-name
+  "Accepts one expression to create Clickhouse TO clause.
+
+  (to-name :db.name)
+
+  Produces:
+  TO db.name"
+  [& args]
+  (generic-1 :to-name args))
+
+(defn engine
+  "Accepts one expression to create Clickhouse Engine clause.
+
+  (engine :engine)
+
+  Produces:
+  ENGINE engine"
+  [& args]
+  (generic-1 :engine args))
+
+(defn inner-engine
+  "Accepts one expression to create Clickhouse INNER ENGINE clause.
+
+  (inner-engine :engine)
+
+  Produces:
+  INNER ENGINE = engine"
+  [& args]
+  (generic-1 :inner-engine args))
+
+(defn watermark
+  "Accepts one expression to create Clickhouse WATERMARK clause.
+
+  (watermark :strategy)
+
+  Produces:
+  WATERMARK = strategy"
+  [& args]
+  (generic-1 :watermark args))
+
+(defn allowed-lateness
+  "Accepts one expression to create Clickhouse WATERMARK clause.
+
+  (allowed-lateness :allowed-lateness)
+
+  Produces:
+  ALLOWED LATENESS = interval"
+  [& args]
+  (generic-1 :allowed-lateness args))
+
+(defn populate
+  "This clause returns the POPULATE clause for clickhouse.
+
+  (populate )
+
+  Produces:
+  POPULATE"
+  [& args]
+  (generic :populate args))
+
+(defn watch
+  "This clause returns the WATCH query for clickhouse.
+
+  (watch :db.live_view)
+
+  Produces:
+  WATCH db.live_view"
+  [& args]
+  (generic-1 :watch args))
+
+(defn events
+  "This clause returns the EVENTS clause for clickhouse.
+
+  (events)
+
+  Produces:
+  EVENTS"
+  [& args]
+  (generic :events args))
+
+(defn clickhouse-comment
+  "Accepts one expression to create Clickhouse COMMENT clause.
+
+  (clickhouse-comment \"comment\")
+
+  Produces:
+  COMMENT comment"
+  [& args]
+  (generic-1 :clickhouse-comment args))
+
+(defn with-timeout
+  "Accepts one expression to create Clickhouse WITH TIMEOUT clause.
+
+  (with-timeout :234)
+
+  Produces:
+  WITH TIMEOUT 234"
+  [& args]
+  (generic-1 :with-timeout args))
+
+(defn with-refresh
+  "Accepts one expression to create Clickhouse WITH REFRESH clause.
+
+  (with-refresh :234)
+  (-> (with-timeout :456) (with-refresh :234))
+
+  Produces:
+  WITH REFRESH 234
+  WITH TIMEOUT 456 AND REFRESH 234"
+  [& args]
+  (generic-1 :with-refresh args))
+
 (defn create-table
   "Accepts a table name to create and optionally a
   flag to trigger IF NOT EXISTS in the SQL:
@@ -314,6 +445,36 @@
   {:arglists '([view])}
   [& args]
   (generic :create-materialized-view args))
+
+(defn create-live-view
+  "Accepts a single view name to create.
+
+  (-> (create-live-view :cities)
+      (select :*) (from :city))
+      (with-data true)"
+  {:arglists '([view])}
+  [& args]
+  (generic :create-live-view args))
+
+(defn create-window-view
+  "Accepts a single view name to create.
+
+  (-> (create-window-view :cities)
+      (select :*) (from :city))
+      (with-data true)"
+  {:arglists '([view])}
+  [& args]
+  (generic :create-window-view args))
+
+(defn create-function
+  "Accepts a single function name to create.
+
+  (-> (create-function :cities)
+      (select :*) (from :city))
+      (with-data true)"
+  {:arglists '([function])}
+  [& args]
+  (generic :create-function args))
 
 (defn drop-table
   "Accepts one or more table names to drop.
@@ -1102,7 +1263,7 @@
 (defn clickhouse-format
   "Accepts one expression.
 
-  (format :CSV)
+  (clickhouse-format :CSV)
 
   Produces:
   FORMAT CSV"

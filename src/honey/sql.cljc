@@ -46,11 +46,15 @@
    :alter-table :add-column :drop-column
    :alter-column :modify-column :rename-column
    :add-index :drop-index :rename-table
+   :create-database :create-function
    :create-table :create-table-as :with-columns
-   :create-view :create-materialized-view :create-extension
+   :create-view :create-materialized-view :create-live-view :create-window-view :create-extension
+   :watch
    :drop-table :drop-view :drop-materialized-view :drop-extension
    :refresh-materialized-view
    ;; then SQL clauses in priority order:
+   :on-cluster :to-name :inner-engine :engine :watermark :allowed-lateness
+   :populate :clickhouse-comment :with-timeout :with-refresh :events ;; clickhouse modifiers for :create
    :raw :nest :with :with-recursive :intersect :union :union-all :except :except-all
    :table
    :select :select-distinct :select-distinct-on :select-top :select-distinct-top
@@ -64,12 +68,10 @@
    :prewhere
    :where :group-by :limit-by :having
    :window :partition-by
-   :order-by :limit :offset :fetch :for :lock :values
+   :order-by :limit :offset :fetch :for :lock :into-outfile :clickhouse-format :values
    :on-conflict :on-constraint :do-nothing :do-update-set :on-duplicate-key-update
    :returning
-   :with-data
-   :into-outfile
-   :clickhouse-format])
+   :with-data])
 
 (defn add-clause-before
   "Low-level helper just to insert a new clause.
@@ -1057,17 +1059,54 @@
          :add-index       (fn [_ x] (format-on-expr :add x))
          :drop-index      #'format-selector
          :rename-table    (fn [_ x] (format-selector :rename-to x))
+         :create-database (fn [_ x] (format-create :create :database x nil))
+         :create-function (fn [_ x] (format-create :create :function x :as))
          :create-table    (fn [_ x] (format-create :create :table x nil))
          :create-table-as (fn [_ x] (format-create :create :table x :as))
          :create-extension (fn [_ x] (format-create :create :extension x nil))
+         :watch           (fn [_ x] [(str (sql-kw :watch)  " " (format-entity x))])
          :with-columns    #'format-table-columns
          :create-view     (fn [_ x] (format-create :create :view x :as))
          :create-materialized-view (fn [_ x] (format-create :create :materialized-view x :as))
+         :create-live-view (fn [_ x] (format-create :create :live-view x :as))
+         :create-window-view (fn [_ x] (format-create :create :window-view x :as))
          :drop-table      #'format-drop-items
          :drop-extension  #'format-drop-items
          :drop-view       #'format-drop-items
          :drop-materialized-view #'format-drop-items
          :refresh-materialized-view (fn [_ x] (format-create :refresh :materialized-view x nil))
+         :on-cluster      (fn [_ x]
+                            [(str (sql-kw :on) " " (sql-kw :cluster) " " (name x))])
+         :to-name         (fn [_ x]
+                            [(str (sql-kw :to) " " (format-entity x))])
+         :inner-engine    (fn [_ x]
+                            (let [[sql & params] (format-expr x)]
+                              (into [(str (sql-kw :inner-engine) " = " sql)] params)))
+         :engine          (fn [_ x]
+                            (let [[sql & params] (format-expr x)]
+                              (into [(str (sql-kw :engine) " = " sql)] params)))
+         :watermark       (fn [_ x]
+                            (let [[sql & params] (format-expr x)]
+                              (into [(str (sql-kw :watermark) " = " sql)] params)))
+         :allowed-lateness (fn [_ x]
+                            (let [[sql & params] (format-expr x)]
+                              (into [(str (sql-kw :allowed_lateness) " = " sql)] params)))
+         :populate        (fn [_ _]
+                            [(str (sql-kw :populate))])
+         :clickhouse-comment (fn [_ x]
+                            [(str (sql-kw :comment) " " (name x))])
+         :with-timeout     (fn [_ x]
+                             (let [[sql params] (format-expr x)]
+                               (into [(str (sql-kw :with-timeout) " " sql)]  params)))
+         :with-refresh     (fn [_ x]
+                             (let [[sql params] (format-expr x)]
+                               (into [(str (if (contains-clause? :with-timeout)
+                                             (str (sql-kw :and) " " (sql-kw :refresh))
+                                             (sql-kw :with-refresh))
+                                           " "
+                                           sql)]  params)))
+         :events          (fn [_ _]
+                            [(str (sql-kw :events))])
          :raw             (fn [_ x] (raw-render x))
          :nest            (fn [_ x]
                             (let [[sql & params] (format-dsl x {:nested true})]
@@ -1139,15 +1178,6 @@
                               (into [(str sql " " (sql-kw rows))] params)))
          :for             #'format-lock-strength
          :lock            #'format-lock-strength
-         :values          #'format-values
-         :on-conflict     #'format-on-conflict
-         :on-constraint   #'format-selector
-         :do-nothing      (fn [k _] (vector (sql-kw k)))
-         :do-update-set   #'format-do-update-set
-         ;; MySQL-specific but might as well be always enabled:
-         :on-duplicate-key-update #'format-do-update-set
-         :returning       #'format-selects
-         :with-data       #'format-with-data
          :into-outfile    (fn [_ [file-name {:keys [compression level]}]]
                             [(str (sql-kw :into-outfile) " " (name file-name)
                                   (if compression
@@ -1157,7 +1187,16 @@
                                     (str " LEVEL " level)
                                     ""))])
          :clickhouse-format  (fn [_ x]
-                               [(str (sql-kw :format) " " (sql-kw x))])}))
+                               [(str (sql-kw :format) " " (name x))])
+         :values          #'format-values
+         :on-conflict     #'format-on-conflict
+         :on-constraint   #'format-selector
+         :do-nothing      (fn [k _] (vector (sql-kw k)))
+         :do-update-set   #'format-do-update-set
+         ;; MySQL-specific but might as well be always enabled:
+         :on-duplicate-key-update #'format-do-update-set
+         :returning       #'format-selects
+         :with-data       #'format-with-data}))
 
 (assert (= (set @base-clause-order)
            (set @current-clause-order)
