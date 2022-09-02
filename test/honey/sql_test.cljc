@@ -212,7 +212,57 @@
   (is (= ["CREATE FUNCTION name ON CLUSTER cluster AS (x, k, b) -> k*x + b"]
          (-> (h/create-function :name (h/on-cluster :cluster))
              (assoc :raw ["(x, k, b)" " -> " "k*x + b"])
-             (format {:dialect :clickhouse})))))
+             (format {:dialect :clickhouse}))))
+  (is (= ["CREATE ROLE IF NOT EXISTS name1"]
+         (-> (h/create-role :name1 :or-replace)
+             (format {:dialect :clickhouse}))))
+  (is (=  ["CREATE ROW POLICY OR REPLACE name1 ON CLUSTER cluster_name ON db.table1"]
+         (-> (h/create-row-policy
+               :name1
+               :or-replace
+               (-> (h/on-cluster :cluster_name) (assoc :raw ["ON " "db.table1"])))
+             (format {:dialect :clickhouse}))))
+  (is (=  ["CREATE QUOTA OR REPLACE name1 ON CLUSTER cluster_name"]
+          (-> (h/create-quota :name1 :or-replace (h/on-cluster :cluster_name))
+              (format {:dialect :clickhouse}))))
+  (is (=  ["CREATE SETTINGS PROFILE OR REPLACE name1 ON CLUSTER cluster_name"]
+          (-> (h/create-settings-profile :name1 :or-replace (h/on-cluster :cluster_name))
+              (format {:dialect :clickhouse}))))
+  (is (=  ["ALTER TABLE foo ADD COLUMN IF NOT EXISTS id int AFTER NestedColumn"]
+          (-> (h/alter-table :foo)
+              (h/add-column :id :int :AFTER :NestedColumn :if-not-exists)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["DROP COLUMN IF EXISTS name"]
+          (-> (h/drop-column :if-exists :name)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["RENAME COLUMN IF EXISTS name TO name2"]
+          (-> (h/rename-column :name :name2 :if-exists)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["CLEAR COLUMN IF EXISTS name IN PARTITION partition_name"]
+          (-> (h/clear-column :name :partition_name :if-exists)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["COMMENT COLUMN IF EXISTS name 'Text comment'"]
+          (-> (h/comment-column :name "Text comment" :if-exists)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["ALTER TABLE table2 ON CLUSTER cluster REPLACE PARTITION partition_expr FROM table1"]
+          (-> (h/alter-table :table2 (h/on-cluster :cluster))
+              (h/alter-partition :partition_expr :replace)
+              (h/from :table1)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["ALTER TABLE table2 ON CLUSTER cluster MOVE PARTITION partition_expr TO TABLE table_dest"]
+          (-> (h/alter-table :table2 (h/on-cluster :cluster))
+              (h/alter-partition :partition_expr :move {:to-table :table_dest})
+              (format {:dialect :clickhouse}))))
+  (is (=  ["ALTER TABLE table2 ON CLUSTER cluster FREEZE PARTITION partition_expr WITH NAME 'backup_name'"]
+          (-> (h/alter-table :table2 (h/on-cluster :cluster))
+              (h/alter-partition :partition_expr :freeze {:with-name "backup_name"})
+              (format {:dialect :clickhouse}))))
+  (is (=  ["MODIFY SETTING max_part_loading_threads=8, max_parts_in_total=500"]
+          (-> (h/alter-setting :modify [[:max_part_loading_threads 8] [:max_parts_in_total 500]])
+              (format {:dialect :clickhouse}))))
+  (is (=  ["REPLACE SETTING max_part_loading_threads, max_parts_in_total"]
+          (-> (h/alter-setting :replace [[:max_part_loading_threads 8] [:max_parts_in_total 500]])
+              (format {:dialect :clickhouse})))))
 
 (deftest expr-tests
   ;; special-cased = nil:

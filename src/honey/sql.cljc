@@ -44,22 +44,23 @@
   "The (default) order for known clauses. Can have items added and removed."
   [;; DDL comes first (these don't really have a precedence):
    :alter-table :add-column :drop-column
-   :alter-column :modify-column :rename-column
+   :alter-column :modify-column :rename-column :clear-column :comment-column
    :add-index :drop-index :rename-table
-   :create-database :create-function
+   :create-database :create-function :create-user :create-role :create-row-policy
+   :create-quota :create-settings-profile :create-dictionary
    :create-table :create-table-as :with-columns
    :create-view :create-materialized-view :create-live-view :create-window-view :create-extension
    :watch
    :drop-table :drop-view :drop-materialized-view :drop-extension
    :refresh-materialized-view
    ;; then SQL clauses in priority order:
-   :on-cluster :to-name :inner-engine :engine :watermark :allowed-lateness
-   :populate :clickhouse-comment :with-timeout :with-refresh :events ;; clickhouse modifiers for :create
+   :on-cluster :to-name :inner-engine :engine :watermark :allowed-lateness :alter-partition
+   :alter-setting :populate :clickhouse-comment :with-timeout :with-refresh :events
    :raw :nest :with :with-recursive :intersect :union :union-all :except :except-all
    :table
    :select :select-distinct :select-distinct-on :select-top :select-distinct-top
    :into :bulk-collect-into
-   :insert-into :update :delete :delete-from :truncate
+   :insert-into :update :delete :delete-from :delete-where :truncate
    :columns :set :from :using
    :sample
    :join-by
@@ -933,7 +934,14 @@
         opts (drop-while tab? params)
         ine  (last coll)
         [prequel table ine]
-        (if (= :if-not-exists (sym->kw ine))
+        (if (or (= :if-not-exists (sym->kw ine))
+                (and (= :or-replace (sym->kw ine))
+                     (clickhouse?)
+                     (or (contains-clause? :create-user)
+                         (contains-clause? :create-role)
+                         (contains-clause? :create-row-policy)
+                         (contains-clause? :create-quota)
+                         (contains-clause? :create-settings-profile))))
           [(butlast (butlast coll)) (last (butlast coll)) ine]
           [(butlast coll) (last coll) nil])]
     (into [(str/join " " (map sql-kw prequel))
@@ -1003,8 +1011,82 @@
     [(str (sql-kw k) " " (sql-kw :if-not-exists) " " (format-single-column (butlast spec)))]
     [(str (sql-kw k) " " (format-single-column spec))]))
 
-(defn- format-rename-item [k [x y]]
-  [(str (sql-kw k) " " (format-entity x) " TO " (format-entity y))])
+(defn- format-rename-item [k [x y if-exists]]
+  [(str (sql-kw k)
+        (if (contains? #{:if-exists 'if-exists} if-exists)
+          (str " " (sql-kw :if-exists))
+          "")
+        " "
+        (format-entity x)
+        " TO "
+        (format-entity y))])
+
+(defn- format-clear-item [k [x y if-exists]]
+  [(str (sql-kw k)
+        (if (contains? #{:if-exists 'if-exists} if-exists)
+          (str " " (sql-kw :if-exists))
+          "")
+        " "
+        (format-entity x)
+        " IN PARTITION "
+        (format-entity y))])
+
+(defn- format-comment-item [k [x y if-exists]]
+  [(str (sql-kw k)
+        (if (contains? #{:if-exists 'if-exists} if-exists)
+          (str " " (sql-kw :if-exists))
+          "")
+        " "
+        (format-entity x)
+        " '"
+        (format-entity y)
+        "'")])
+
+(defn format-assignable-clauses
+  "Given a map or sequence, returns the children of the map as clause with the key
+   prepended to the value and separated by `spacing`
+
+  Given:
+
+  (format-assignable-clauses {:replace-partition :partition_expr})
+  (format-assignable-clauses {:engine :engine_name} {:spacing \" = \"})
+  (format-assignable-clauses [[:replace-partition :partition_expr]
+                              [:engine :engine_name {:spacing \" = \"}]])
+
+  Produces:
+
+  REPLACE PARTITION partition_expr
+  ENGINE = engine_name
+  REPLACE PARTITION partition_expr ENGINE = engine_name"
+  [m {:keys [spacing] :as opts}]
+  (let [op #(if (string? %)
+              (str "'" (name %) "'")
+             (format-entity %))]
+    (if (map? m)
+      (reduce-kv
+        (fn [ret k v]
+          (str (when ret (str ret " ")) (sql-kw k) (or spacing " ") (op v)))
+        nil
+        m)
+      (reduce
+        (fn [ret [k v {:keys [spacing] :as opts}]]
+          (str (when ret (str ret " ")) (sql-kw k) (or spacing " ") (op v)))
+        nil
+        m))))
+
+(defn format-alter-setting
+  [k [op xs]]
+  (let [op-n #(cond (string? %) (str "'" % "'")
+                    (number? %) %
+                    :else (format-entity %))
+        sql (reduce (fn [ret [s v]]
+                      (str (when ret (str ret ", "))
+                           (op-n s)
+                           (when (= :modify op) "=")
+                           (when (= :modify op)(op-n v))))
+                    nil
+                    xs)]
+    [(str (sql-kw op) " SETTING " sql)]))
 
 (defn- raw-render [s]
   (if (sequential? s)
@@ -1055,12 +1137,20 @@
                              spec))
          :modify-column   #'format-add-item
          :rename-column   #'format-rename-item
+         :clear-column    #'format-clear-item
+         :comment-column    #'format-comment-item
          ;; so :add-index works with both [:index] and [:unique]
          :add-index       (fn [_ x] (format-on-expr :add x))
          :drop-index      #'format-selector
          :rename-table    (fn [_ x] (format-selector :rename-to x))
          :create-database (fn [_ x] (format-create :create :database x nil))
          :create-function (fn [_ x] (format-create :create :function x :as))
+         :create-user     (fn [_ x] (format-create :create :user x nil))
+         :create-role     (fn [_ x] (format-create :create :role x nil))
+         :create-row-policy (fn [_ x] (format-create :create :row-policy x nil))
+         :create-quota    (fn [_ x] (format-create :create :quota x nil))
+         :create-settings-profile (fn [_ x] (format-create :create :settings-profile x nil))
+         :create-dictionary (fn [_ x] (format-create :create :dictionary x nil))
          :create-table    (fn [_ x] (format-create :create :table x nil))
          :create-table-as (fn [_ x] (format-create :create :table x :as))
          :create-extension (fn [_ x] (format-create :create :extension x nil))
@@ -1075,29 +1165,29 @@
          :drop-view       #'format-drop-items
          :drop-materialized-view #'format-drop-items
          :refresh-materialized-view (fn [_ x] (format-create :refresh :materialized-view x nil))
-         :on-cluster      (fn [_ x]
-                            [(str (sql-kw :on) " " (sql-kw :cluster) " " (name x))])
+         :on-cluster      (fn [k x]
+                            [(format-assignable-clauses {k x} nil)])
          :to-name         (fn [_ x]
-                            [(str (sql-kw :to) " " (format-entity x))])
-         :inner-engine    (fn [_ x]
-                            (let [[sql & params] (format-expr x)]
-                              (into [(str (sql-kw :inner-engine) " = " sql)] params)))
-         :engine          (fn [_ x]
-                            (let [[sql & params] (format-expr x)]
-                              (into [(str (sql-kw :engine) " = " sql)] params)))
-         :watermark       (fn [_ x]
-                            (let [[sql & params] (format-expr x)]
-                              (into [(str (sql-kw :watermark) " = " sql)] params)))
-         :allowed-lateness (fn [_ x]
-                            (let [[sql & params] (format-expr x)]
-                              (into [(str (sql-kw :allowed_lateness) " = " sql)] params)))
+                            [(format-assignable-clauses {:to x} nil)])
+         :inner-engine    (fn [k x]
+                            [(format-assignable-clauses {k x} {:spacing " = "})])
+         :engine          (fn [k x]
+                            [(format-assignable-clauses {k x} {:spacing " = "})])
+         :watermark       (fn [k x]
+                            [(format-assignable-clauses {k x} {:spacing " = "})])
+         :allowed-lateness (fn [k x]
+                             [(format-assignable-clauses {k x} {:spacing " = "})])
+         :alter-partition  (fn [k [n m opts]]
+                             [(str (format-assignable-clauses {m n} {:spacing " PARTITION "})
+                                   (when opts
+                                     (str " " (format-assignable-clauses opts nil))))])
+         :alter-setting    #'format-alter-setting
          :populate        (fn [_ _]
                             [(str (sql-kw :populate))])
-         :clickhouse-comment (fn [_ x]
-                            [(str (sql-kw :comment) " " (name x))])
-         :with-timeout     (fn [_ x]
-                             (let [[sql params] (format-expr x)]
-                               (into [(str (sql-kw :with-timeout) " " sql)]  params)))
+         :clickhouse-comment (fn [k x]
+                               [(format-assignable-clauses {:comment x} nil)])
+         :with-timeout     (fn [k x]
+                             [(format-assignable-clauses {k x} nil)])
          :with-refresh     (fn [_ x]
                              (let [[sql params] (format-expr x)]
                                (into [(str (if (contains-clause? :with-timeout)
@@ -1130,6 +1220,7 @@
          :update          (check-where #'format-selector)
          :delete          (check-where #'format-selects)
          :delete-from     (check-where #'format-selector)
+         :delete-where    (check-where #'format-selects)
          :truncate        #'format-selector
          :columns         #'format-columns
          :set             #'format-set-exprs

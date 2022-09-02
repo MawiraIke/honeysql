@@ -172,12 +172,14 @@
   (generic :add-column col-elems))
 
 (defn drop-column
-  "Takes a single column name (use with `alter-table`).
+  "Takes a single column name and an optional
+  flag to trigger IF EXISTS (use with `alter-table`).
 
-  (alter-table :foo (drop-column :bar))"
+  (alter-table :foo (drop-column :bar))
+  (alter-table :foo (drop-column :if-exists :bar))"
   {:arglists '([col])}
   [& args]
-  (generic-1 :drop-column args))
+  (generic :drop-column args))
 
 (defn alter-column
   "Like add-column, accepts any number of SQL elements
@@ -200,12 +202,34 @@
 
 (defn rename-column
   "Accepts two column names: the original name and the
-  new name to which it should be renamed:
+  new name to which it should be renamed and an optional
+  flag to trigger IF EXISTS
 
-  (rename-column :name :full-name)"
-  {:arglists '([old-col new-col])}
+  (rename-column :name :full-name)
+  (rename-column :name :full-name :if-exists)"
+  {:arglists '([old-col new-col] [old-col new-col if-exists])}
   [& args]
   (generic :rename-column args))
+
+(defn clear-column
+  "Accepts a column name, a partition and an optional
+  flag to trigger IF EXISTS
+
+  (clear-column :name :partition_name)
+  (clear-column :name :partition_name :if-exists)"
+  {:arglists '([old-col new-col] [old-col new-col if-exists])}
+  [& args]
+  (generic :clear-column args))
+
+(defn comment-column
+  "Accepts a column name, a comment and an optional
+  flag to trigger IF EXISTS
+
+  (comment-column :name \"Text comment\")
+  (comment-column :name \"Text comment\" :if-exists)"
+  {:arglists '([old-col new-col] [old-col new-col if-exists])}
+  [& args]
+  (generic :comment-column args))
 
 (defn add-index
   "Like add-column, this accepts any number of SQL
@@ -238,82 +262,73 @@
 
 (defn create-database
   "Accepts a database name to create and optionally a
-  flag to trigger IF NOT EXISTS in the SQL:
+  flag to trigger IF NOT EXISTS:
 
   (create-database :foo)
   (create-database :foo :if-not-exists)"
   [& args]
   (generic :create-database args))
 
-(defn on-cluster
-  "Accepts one expression to create Clickhouse ON CLUSTER clause.
+(defn create-user
+  "Accepts a user name to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (on-cluster :cluster)
-
-  Produces:
-  ON CLUSTER cluster"
+  (create-user :foo)
+  (create-user :foo :if-not-exists)
+  (create-user :foo :or-replace)"
   [& args]
-  (generic-1 :on-cluster args))
+  (generic :create-user args))
 
-(defn to-name
-  "Accepts one expression to create Clickhouse TO clause.
+(defn create-role
+  "Accepts a role to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (to-name :db.name)
-
-  Produces:
-  TO db.name"
+  (create-role :role)
+  (create-role :role :if-not-exists)
+  (create-role :role :or-replace)"
   [& args]
-  (generic-1 :to-name args))
+  (generic :create-role args))
 
-(defn engine
-  "Accepts one expression to create Clickhouse Engine clause.
+(defn create-row-policy
+  "Accepts a row policy to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (engine :engine)
-
-  Produces:
-  ENGINE engine"
+  (create-row-policy :policy)
+  (create-row-policy :policy :if-not-exists)
+  (create-row-policy :policy :or-replace)"
   [& args]
-  (generic-1 :engine args))
+  (generic :create-row-policy args))
 
-(defn inner-engine
-  "Accepts one expression to create Clickhouse INNER ENGINE clause.
+(defn create-quota
+  "Accepts a quota to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (inner-engine :engine)
-
-  Produces:
-  INNER ENGINE = engine"
+  (create-quota :quota)
+  (create-quota :quota :if-not-exists)
+  (create-quota :quota :or-replace)"
   [& args]
-  (generic-1 :inner-engine args))
+  (generic :create-quota args))
 
-(defn watermark
-  "Accepts one expression to create Clickhouse WATERMARK clause.
+(defn create-settings-profile
+  "Accepts a quota to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (watermark :strategy)
-
-  Produces:
-  WATERMARK = strategy"
+  (create-settings-profile :profile)
+  (create-settings-profile :profile :if-not-exists)
+  (create-settings-profile :profile :or-replace)"
   [& args]
-  (generic-1 :watermark args))
+  (generic :create-settings-profile args))
 
-(defn allowed-lateness
-  "Accepts one expression to create Clickhouse WATERMARK clause.
+(defn create-dictionary
+  "Accepts a dictionary to create and optionally a
+  flag to trigger IF NOT EXISTS/OR REPLACE:
 
-  (allowed-lateness :allowed-lateness)
-
-  Produces:
-  ALLOWED LATENESS = interval"
+  (create-dictionary :dictionary)
+  (create-dictionary :dictionary :if-not-exists)
+  (create-dictionary :or-replace :dictionary :if-not-exists)
+  (create-dictionary :dictionary :or-replace)"
   [& args]
-  (generic-1 :allowed-lateness args))
-
-(defn populate
-  "This clause returns the POPULATE clause for clickhouse.
-
-  (populate )
-
-  Produces:
-  POPULATE"
-  [& args]
-  (generic :populate args))
+  (generic :create-dictionary args))
 
 (defn watch
   "This clause returns the WATCH query for clickhouse.
@@ -324,48 +339,6 @@
   WATCH db.live_view"
   [& args]
   (generic-1 :watch args))
-
-(defn events
-  "This clause returns the EVENTS clause for clickhouse.
-
-  (events)
-
-  Produces:
-  EVENTS"
-  [& args]
-  (generic :events args))
-
-(defn clickhouse-comment
-  "Accepts one expression to create Clickhouse COMMENT clause.
-
-  (clickhouse-comment \"comment\")
-
-  Produces:
-  COMMENT comment"
-  [& args]
-  (generic-1 :clickhouse-comment args))
-
-(defn with-timeout
-  "Accepts one expression to create Clickhouse WITH TIMEOUT clause.
-
-  (with-timeout :234)
-
-  Produces:
-  WITH TIMEOUT 234"
-  [& args]
-  (generic-1 :with-timeout args))
-
-(defn with-refresh
-  "Accepts one expression to create Clickhouse WITH REFRESH clause.
-
-  (with-refresh :234)
-  (-> (with-timeout :456) (with-refresh :234))
-
-  Produces:
-  WITH REFRESH 234
-  WITH TIMEOUT 456 AND REFRESH 234"
-  [& args]
-  (generic-1 :with-refresh args))
 
 (defn create-table
   "Accepts a table name to create and optionally a
@@ -663,6 +636,21 @@
   {:arglists '([table])}
   [& args]
   (generic :delete-from args))
+
+(defn delete-where
+  "For deleting data matching the specified filtering
+  expression. Accepts a single filtering expression.
+  This is intended for clickhouse databases and does not
+  refer to the sql `delete .... where condition`. In clickhouse
+  the expression must be of type UInt8
+
+  (-> (delete-where 233))
+
+  Produces
+  DELETE WHERE 233"
+  {:arglists '([table])}
+  [& args]
+  (generic :delete-where args))
 
 (defn truncate
   "Accepts a single table name to truncate."
@@ -1243,6 +1231,148 @@
                                {:fields do-update-set
                                 :where  where}
                                do-update-set))))))
+
+(defn on-cluster
+  "Accepts one expression to create Clickhouse ON CLUSTER clause.
+
+  (on-cluster :cluster)
+
+  Produces:
+  ON CLUSTER cluster"
+  [& args]
+  (generic-1 :on-cluster args))
+
+(defn to-name
+  "Accepts one expression to create Clickhouse TO clause.
+
+  (to-name :db.name)
+
+  Produces:
+  TO db.name"
+  [& args]
+  (generic-1 :to-name args))
+
+(defn engine
+  "Accepts one expression to create Clickhouse Engine clause.
+
+  (engine :engine)
+
+  Produces:
+  ENGINE engine"
+  [& args]
+  (generic-1 :engine args))
+
+(defn inner-engine
+  "Accepts one expression to create Clickhouse INNER ENGINE clause.
+
+  (inner-engine :engine)
+
+  Produces:
+  INNER ENGINE = engine"
+  [& args]
+  (generic-1 :inner-engine args))
+
+(defn watermark
+  "Accepts one expression to create Clickhouse WATERMARK clause.
+
+  (watermark :strategy)
+
+  Produces:
+  WATERMARK = strategy"
+  [& args]
+  (generic-1 :watermark args))
+
+(defn allowed-lateness
+  "Accepts one expression to create Clickhouse WATERMARK clause.
+
+  (allowed-lateness :allowed-lateness)
+
+  Produces:
+  ALLOWED LATENESS = interval"
+  [& args]
+  (generic-1 :allowed-lateness args))
+
+(defn populate
+  "This clause returns the POPULATE clause for clickhouse.
+
+  (populate )
+
+  Produces:
+  POPULATE"
+  [& args]
+  (generic :populate args))
+
+
+(defn events
+  "This clause returns the EVENTS clause for clickhouse.
+
+  (events)
+
+  Produces:
+  EVENTS"
+  [& args]
+  (generic :events args))
+
+(defn clickhouse-comment
+  "Accepts one expression to create Clickhouse COMMENT clause.
+
+  (clickhouse-comment \"comment\")
+
+  Produces:
+  COMMENT 'comment'"
+  [& args]
+  (generic-1 :clickhouse-comment args))
+
+(defn with-timeout
+  "Accepts one expression to create Clickhouse WITH TIMEOUT clause.
+
+  (with-timeout :234)
+
+  Produces:
+  WITH TIMEOUT 234"
+  [& args]
+  (generic-1 :with-timeout args))
+
+(defn with-refresh
+  "Accepts one expression to create Clickhouse WITH REFRESH clause.
+
+  (with-refresh :234)
+  (-> (with-timeout :456) (with-refresh :234))
+
+  Produces:
+  WITH REFRESH 234
+  WITH TIMEOUT 456 AND REFRESH 234"
+  [& args]
+  (generic-1 :with-refresh args))
+
+(defn alter-partition
+  "Accepts a partition name and a partition operation. An option map
+  can be passed to enable passing of extra params.
+
+  (alter-partition :partition_expr :attach)
+  (alter-partition :partition_expr :move {:to-table :table_dest})
+
+  Produces
+  ATTACH PARTITION partition_expr
+  MOVE PARTITION partition_expr TO TABLE"
+  {:arglists '([partition operation] [partition operation more])}
+  [& args]
+  (generic :alter-partition args))
+
+(defn alter-setting
+  "Accepts an operation and a sequence of vectors of two children each.
+  The first child is converted to a setting name and the second child
+  the value of the setting.
+
+  (alter-setting :modify [[:max_part_loading_threads 8] [:max_parts_in_total 500]])
+  (alter-setting :replace [[:max_parts_in_total] [:max_part_loading_threads]])
+
+  Produces
+  MODIFY SETTING max_part_loading_threads=8, max_parts_in_total=500
+  REPLACE SETTING max_parts_in_total, max_part_loading_threads"
+  {:arglists '([operation [name value]] [operation [name value]])}
+  [& args]
+  (generic :alter-setting args))
 
 (defn into-outfile
   "Accepts one or more expressions to format to into outfile clause
