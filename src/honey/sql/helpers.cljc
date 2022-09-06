@@ -231,6 +231,86 @@
   [& args]
   (generic :comment-column args))
 
+
+(defn alter-partition
+  "Accepts a partition name and a partition operation. An option map
+  can be passed to enable passing of extra params.
+
+  (alter-partition :partition_expr :attach)
+  (alter-partition :partition_expr :move {:to-table :table_dest})
+
+  Produces
+  ATTACH PARTITION partition_expr
+  MOVE PARTITION partition_expr TO TABLE table_dest"
+  {:arglists '([partition operation] [partition operation more])}
+  [& args]
+  (generic :alter-partition args))
+
+(defn alter-setting
+  "Accepts an operation and a sequence of vectors of two children each.
+  The first child is converted to a setting name and the second child
+  the value of the setting.
+
+  (alter-setting :modify [[:max_part_loading_threads 8] [:max_parts_in_total 500]])
+  (alter-setting :replace [[:max_parts_in_total] [:max_part_loading_threads]])
+
+  Produces
+  MODIFY SETTING max_part_loading_threads=8, max_parts_in_total=500
+  REPLACE SETTING max_parts_in_total, max_part_loading_threads"
+  {:arglists '([operation [name value]] [operation [name value]])}
+  [& args]
+  (generic :alter-setting args))
+
+(defn alter-user
+  "Accepts a user name to change and optionally a
+  flag to trigger IF EXISTS:
+
+  (alter-user :name)
+  (alter-user :if-exists :name)"
+  {:arglists '([if-exists name])}
+  [& args]
+  (generic :alter-user args))
+
+(defn alter-quota
+  "Accepts a quota to change and optionally a
+  flag to trigger IF EXISTS:
+
+  (alter-quota :quota)
+  (alter-quota :if-exists :quota)"
+  {:arglists '([if-exists quota])}
+  [& args]
+  (generic :alter-quota args))
+
+(defn alter-role
+  "Accepts a role to change and optionally a
+  flag to trigger IF EXISTS:
+
+  (alter-role :role)
+  (alter-role :if-exists :role)"
+  {:arglists '([if-exists role])}
+  [& args]
+  (generic :alter-role args))
+
+(defn alter-policy
+  "Accepts a row policy to change and optionally a
+  flag to trigger IF EXISTS:
+
+  (alter-policy :policy)
+  (alter-policy :if-exists :policy)"
+  {:arglists '([if-exists policy])}
+  [& args]
+  (generic :alter-policy args))
+
+(defn alter-settings-profile
+  "Accepts a setting profile to change and optionally a
+  flag to trigger IF EXISTS:
+
+  (alter-settings-profile :profile)
+  (alter-settings-profile :if-exists :profile)"
+  {:arglists '([if-exists profile])}
+  [& args]
+  (generic :alter-settings-profile args))
+
 (defn add-index
   "Like add-column, this accepts any number of SQL
   elements that describe a new index to be added:
@@ -470,6 +550,62 @@
   "Accepts one or more materialied view names to drop."
   [& views]
   (generic :drop-materialized-view views))
+
+(defn drop-database
+  "Accepts a database name to drop.
+
+  (drop-database :foo)"
+  [& database]
+  (generic :drop-database database))
+
+(defn drop-dictionary
+  "Accepts a dictionary name to drop.
+
+  (drop-dictionary :foo)"
+  [& database]
+  (generic :drop-dictionary database))
+
+(defn drop-user
+  "Accepts a user name to drop.
+
+  (drop-user :foo)"
+  [& database]
+  (generic :drop-user database))
+
+(defn drop-role
+  "Accepts a role name to delete.
+
+  (drop-role :foo)"
+  [& database]
+  (generic :drop-role database))
+
+(defn drop-quota
+  "Accepts a quota name to delete.
+
+  (drop-quota :foo)"
+  [& database]
+  (generic :drop-quota database))
+
+(defn drop-function
+  "Accepts a function name to delete.
+
+  (drop-function :foo)"
+  [& database]
+  (generic :drop-function database))
+
+(defn drop-row-policy
+  "Accepts a row policy to delete.
+
+  (drop-row-policy :foo)"
+  [& database]
+  (generic :drop-row-policy database))
+
+(defn drop-settings-profile
+  "Accepts a settings profile to delete.
+
+  (drop-settings-profile :foo)"
+  [& database]
+  (generic :drop-settings-profile database))
 
 (defn refresh-materialized-view
   "Accepts a materialied view name to refresh."
@@ -1302,7 +1438,6 @@
   [& args]
   (generic :populate args))
 
-
 (defn events
   "This clause returns the EVENTS clause for clickhouse.
 
@@ -1322,6 +1457,16 @@
   COMMENT 'comment'"
   [& args]
   (generic-1 :clickhouse-comment args))
+
+(defn modify-comment
+  "Accepts a string to create the Clickhouse MODIFY COMMENT clause.
+
+  (modify-comment \"comment\")
+
+  Produces:
+  MODIFY COMMENT 'comment'"
+  [& args]
+  (generic-1 :modify-comment args))
 
 (defn with-timeout
   "Accepts one expression to create Clickhouse WITH TIMEOUT clause.
@@ -1345,34 +1490,84 @@
   [& args]
   (generic-1 :with-refresh args))
 
-(defn alter-partition
-  "Accepts a partition name and a partition operation. An option map
-  can be passed to enable passing of extra params.
-
-  (alter-partition :partition_expr :attach)
-  (alter-partition :partition_expr :move {:to-table :table_dest})
-
-  Produces
-  ATTACH PARTITION partition_expr
-  MOVE PARTITION partition_expr TO TABLE"
-  {:arglists '([partition operation] [partition operation more])}
+(defn show
+  "Accepts expressions to create SHOW statements.
+  These are intended for Clickhouse dialect."
+  {:arglists '([table name {:keys [create? pre more]}])}
   [& args]
-  (generic :alter-partition args))
+  (generic :show args))
 
-(defn alter-setting
-  "Accepts an operation and a sequence of vectors of two children each.
-  The first child is converted to a setting name and the second child
-  the value of the setting.
+(defn grant
+  "Accepts expressions to create GRANT statements.
+  These are intended for Clickhouse dialect.
 
-  (alter-setting :modify [[:max_part_loading_threads 8] [:max_parts_in_total 500]])
-  (alter-setting :replace [[:max_parts_in_total] [:max_part_loading_threads]])
+  (grant :privilege)
 
-  Produces
-  MODIFY SETTING max_part_loading_threads=8, max_parts_in_total=500
-  REPLACE SETTING max_parts_in_total, max_part_loading_threads"
-  {:arglists '([operation [name value]] [operation [name value]])}
+  Produces:
+  GRANT privilege"
+  {:arglists '([privilege {:keys [pre role user table columns mods]}])}
   [& args]
-  (generic :alter-setting args))
+  (generic :grant args))
+
+(defn revoke
+  "Accepts expressions like `grant` to create REVOKE statements.
+  These are intended for Clickhouse dialect.
+
+  (revoke :privilege)
+
+  Produces:
+  REVOKE privilege"
+  {:arglists '([privilege {:keys [pre role user table columns mods]}])}
+  [& args]
+  (generic :revoke args))
+
+(defn attach
+  "Accepts expressions to create ATTACH statements.
+  These are intended for Clickhouse dialect.
+
+  (attach :type :db.name :if-not-exists)
+
+  Produces:
+  ATTACH TYPE IF NOT EXISTS db.name ON CLUSTER cluster_name"
+  {:arglists '([table database if-not-exists])}
+  [& args]
+  (generic :attach args))
+
+(defn detach
+  "Accepts expressions to create ATTACH statements.
+  These are intended for Clickhouse dialect.
+
+  (detach :type :if-exists :db.name)
+
+  Produces:
+  DETACH TYPE IF EXISTS db.name ON CLUSTER cluster_name"
+  {:arglists '([table database if-not-exists])}
+  [& args]
+  (generic :detach args))
+
+(defn explain
+  "Accepts expressions to create EXPLAIN statements.
+  These are intended for Clickhouse dialect.
+
+  (explain :type {})
+
+  Produces:
+  EXPLAIN type"
+  {:arglists '([type {:keys [settings data more]}])}
+  [& args]
+  (generic :explain args))
+
+(defn default-role
+  "Accepts a role and optionally an extra parameter allow setting
+  all user roles to default. Works in conjuction with `alter-user`
+
+  (-> (alter-user :user) (default-role :role :all-except))
+
+  Produces:
+  ALTER USER user DEFAULT ROLE ALL EXCEPT role"
+  {:arglists '([role all] [role all-except])}
+  [& args]
+  (generic :default-role args))
 
 (defn into-outfile
   "Accepts one or more expressions to format to into outfile clause

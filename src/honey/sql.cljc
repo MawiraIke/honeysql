@@ -51,18 +51,21 @@
    :create-table :create-table-as :with-columns
    :create-view :create-materialized-view :create-live-view :create-window-view :create-extension
    :watch
-   :drop-table :drop-view :drop-materialized-view :drop-extension
+   :drop-table :drop-view :drop-materialized-view :drop-extension :drop-database :drop-dictionary
+   :drop-user :drop-role :drop-quota :drop-function :drop-row-policy :drop-settings-profile
    :refresh-materialized-view
    ;; then SQL clauses in priority order:
    :on-cluster :to-name :inner-engine :engine :watermark :allowed-lateness :alter-partition
-   :alter-setting :populate :clickhouse-comment :with-timeout :with-refresh :events
+   :alter-setting :alter-user :alter-quota :alter-role :alter-settings-profile :alter-policy
+   :show :grant :revoke :explain :attach :detach
+   :populate :clickhouse-comment :modify-comment :with-timeout :with-refresh :events
    :raw :nest :with :with-recursive :intersect :union :union-all :except :except-all
    :table
    :select :select-distinct :select-distinct-on :select-top :select-distinct-top
    :into :bulk-collect-into
    :insert-into :update :delete :delete-from :delete-where :truncate
    :columns :set :from :using
-   :sample
+   :sample :default-role
    :join-by
    :join :left-join :right-join :inner-join :outer-join :full-join
    :cross-join
@@ -941,7 +944,11 @@
                          (contains-clause? :create-role)
                          (contains-clause? :create-row-policy)
                          (contains-clause? :create-quota)
-                         (contains-clause? :create-settings-profile))))
+                         (contains-clause? :create-settings-profile)))
+                (and (or (= :all-except (sym->kw ine))
+                         (= :all (sym->kw ine)))
+                     (clickhouse?)
+                     (contains-clause? :alter-user)))
           [(butlast (butlast coll)) (last (butlast coll)) ine]
           [(butlast coll) (last coll) nil])]
     (into [(str/join " " (map sql-kw prequel))
@@ -987,7 +994,11 @@
 (defn- format-drop-items
   [k params]
   (let [[if-exists tables & more] (destructure-drop-items params "DROP options")]
-    [(str/join " " (remove nil? (into [(sql-kw k) if-exists tables] more)))]))
+    [(str/join " " (remove nil? (into [(sql-kw k)
+                                       if-exists
+                                       (when (and (clickhouse?) (= k :alter-settings-profile))
+                                         "TO")
+                                       tables] more)))]))
 
 (def ^:private ^:dynamic *formatted-column* (atom false))
 
@@ -1061,7 +1072,7 @@
   [m {:keys [spacing] :as opts}]
   (let [op #(if (string? %)
               (str "'" (name %) "'")
-             (format-entity %))]
+             (-> % format-expr first))]
     (if (map? m)
       (reduce-kv
         (fn [ret k v]
@@ -1087,6 +1098,55 @@
                     nil
                     xs)]
     [(str (sql-kw op) " SETTING " sql)]))
+
+(defn format-show
+  [k [item name {:keys [create? pre more]}]]
+  [(clojure.string/join
+     " "
+     (remove nil? (into [(sql-kw :show)
+                         (when create?
+                           (sql-kw :create))
+                         (cond (and pre (ident? pre)) (sql-kw pre)
+                               (sequential? pre) (-> pre format-expr first))
+                         (sql-kw item)
+                         (when name
+                           (format-entity name))
+                         (when (map? more)
+                           (first (format-ddl-options [more] "SHOW options")))])))])
+
+(defn format-grant
+  [k [privilege {:keys [pre role user table columns more]}]]
+  [(clojure.string/join
+     " "
+     (remove nil? (into [(sql-kw k)
+                         (when (map? pre)
+                           (first (format-ddl-options [pre] "GRANT options")))
+                         (-> privilege format-expr first)
+                         (when (map? columns)
+                           (first (format-ddl-options [columns] "GRANT options")))
+                         (when table
+                           "ON")
+                         (when table
+                           (-> table format-expr first))
+                         (when (or user role)
+                           (if (= :grant k) "TO" "FROM"))
+                         (when (or user role)
+                           (-> (or user role) format-expr first))
+                         (when (map? more)
+                           (first (format-ddl-options [more] "GRANT options")))])))])
+
+(defn format-explain
+  [k [type {:keys [settings data more]}]]
+  [(clojure.string/join
+     " "
+     (remove nil? (into [(sql-kw k)
+                         (when type (sql-kw type))
+                         (when (map? settings)
+                           (-> [settings] (format-ddl-options "GRANT options") first))
+                         (when (map? data)
+                           (-> [data] (format-ddl-options "GRANT options") first))
+                         (when (map? more)
+                           (-> [more] (format-ddl-options "GRANT options") first))])))])
 
 (defn- raw-render [s]
   (if (sequential? s)
@@ -1164,6 +1224,14 @@
          :drop-extension  #'format-drop-items
          :drop-view       #'format-drop-items
          :drop-materialized-view #'format-drop-items
+         :drop-database   #'format-drop-items
+         :drop-dictionary #'format-drop-items
+         :drop-user       #'format-drop-items
+         :drop-role       #'format-drop-items
+         :drop-quota      #'format-drop-items
+         :drop-function   #'format-drop-items
+         :drop-row-policy   #'format-drop-items
+         :drop-settings-profile #'format-drop-items
          :refresh-materialized-view (fn [_ x] (format-create :refresh :materialized-view x nil))
          :on-cluster      (fn [k x]
                             [(format-assignable-clauses {k x} nil)])
@@ -1182,10 +1250,27 @@
                                    (when opts
                                      (str " " (format-assignable-clauses opts nil))))])
          :alter-setting    #'format-alter-setting
-         :populate        (fn [_ _]
+         :alter-user       #'format-drop-items
+         :alter-quota      #'format-drop-items
+         :alter-role       #'format-drop-items
+         :alter-policy     #'format-drop-items
+         :alter-settings-profile  #'format-drop-items
+         :show             #'format-show
+         :grant            #'format-grant
+         :attach           (fn [k xs]
+                             (format-create k (first xs) (rest xs) nil))
+         :detach           (fn [k xs]
+                             (format-drop-items
+                               (keyword (str (format-entity k) "-" (format-entity (first xs))))
+                               (rest xs)))
+         :revoke            #'format-grant
+         :explain          #'format-explain
+         :populate         (fn [_ _]
                             [(str (sql-kw :populate))])
          :clickhouse-comment (fn [k x]
                                [(format-assignable-clauses {:comment x} nil)])
+         :modify-comment    (fn [k x]
+                              [(format-assignable-clauses {:modify-comment x} nil)])
          :with-timeout     (fn [k x]
                              [(format-assignable-clauses {k x} nil)])
          :with-refresh     (fn [_ x]
@@ -1227,6 +1312,7 @@
          :from            #'format-selects
          :using           #'format-selects
          :sample          #'format-sample
+         :default-role    (fn [_ x] (format-create :default :role x nil))
          :join-by         #'format-join-by
          :join            #'format-join
          :left-join       #'format-join
