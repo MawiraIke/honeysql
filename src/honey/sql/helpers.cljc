@@ -340,6 +340,18 @@
   [& args]
   (generic-1 :rename-table args))
 
+(defn rename-type
+  "Requires three arguments, the entity type, previous name
+  and the name to rename to. This is currently intended for
+  Clickhouse databases.
+
+  (rename-type :dictionary :previous :after)
+
+  Produces: RENAME DICTIONARY previous TO after"
+  {:arglists '([type previous after])}
+  [& args]
+  (generic :rename-type args))
+
 (defn create-database
   "Accepts a database name to create and optionally a
   flag to trigger IF NOT EXISTS:
@@ -793,6 +805,14 @@
   {:arglists '([table])}
   [& args]
   (generic-1 :truncate args))
+
+(defn truncate-if-exists
+  "Accepts a single table name to truncate and an optional
+  flag to trigger IF EXISTS.
+  This function is intended for Clickhouse."
+  {:arglists '([table] [if-exists table])}
+  [& args]
+  (generic :truncate-if-exists args))
 
 (defn columns
   "To be used with `insert-into` to specify the list of
@@ -1505,7 +1525,7 @@
 
   Produces:
   GRANT privilege"
-  {:arglists '([privilege {:keys [pre role user table columns mods]}])}
+  {:arglists '([privilege] [privilege {:keys [pre role user table columns mods]}])}
   [& args]
   (generic :grant args))
 
@@ -1517,7 +1537,7 @@
 
   Produces:
   REVOKE privilege"
-  {:arglists '([privilege {:keys [pre role user table columns mods]}])}
+  {:arglists '([privilege] [privilege {:keys [pre role user table columns mods]}])}
   [& args]
   (generic :revoke args))
 
@@ -1529,7 +1549,7 @@
 
   Produces:
   ATTACH TYPE IF NOT EXISTS db.name ON CLUSTER cluster_name"
-  {:arglists '([table database if-not-exists])}
+  {:arglists '([table database] [table database if-not-exists])}
   [& args]
   (generic :attach args))
 
@@ -1541,9 +1561,23 @@
 
   Produces:
   DETACH TYPE IF EXISTS db.name ON CLUSTER cluster_name"
-  {:arglists '([table database if-not-exists])}
+  {:arglists '([table database] [table database if-not-exists])}
   [& args]
   (generic :detach args))
+
+(defn exists
+  "Accepts expressions to create EXISTS statements.
+  These are intended for Clickhouse dialect.
+
+  (exists :table :db.name (on-cluster :cluster_name))
+  (exists :temporary :dictionary :db.name (on-cluster :cluster_name))
+
+  Produces:
+  EXISTS TABLE db.name ON CLUSTER cluster_name
+  EXISTS TEMPORARY DICTIONARY db.name ON CLUSTER cluster_name"
+  {:arglists '([type name] [temporary type name])}
+  [& args]
+  (generic :exists args))
 
 (defn explain
   "Accepts expressions to create EXPLAIN statements.
@@ -1558,14 +1592,14 @@
   (generic :explain args))
 
 (defn default-role
-  "Accepts a role and optionally an extra parameter allow setting
-  all user roles to default. Works in conjuction with `alter-user`
+  "Accepts a role an optional flag triggering ALL or ALL EXCEPT and
+  and extra flag to add `SET` for SET DEFAULT ROLE clause
 
   (-> (alter-user :user) (default-role :role :all-except))
 
   Produces:
   ALTER USER user DEFAULT ROLE ALL EXCEPT role"
-  {:arglists '([role all] [role all-except])}
+  {:arglists '([role] [set role] [role flag] [set role flag])}
   [& args]
   (generic :default-role args))
 

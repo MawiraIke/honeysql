@@ -158,10 +158,10 @@
              (h/on-cluster :cluster)
              (h/engine [:memory ])
              (h/clickhouse-comment "Comment")
-             (format {:dialect :clickhouse}))))
+             (format {:dialect :clickhouse :inline true}))))
   (is (= ["MODIFY COMMENT 'cluster'"]
          (-> (h/modify-comment "cluster")
-             (format {:dialect :clickhouse}))))
+             (format {:dialect :clickhouse :inline true}))))
   (is (= ["CREATE MATERIALIZED VIEW IF NOT EXISTS table-name ON CLUSTER cluster TO db.name ENGINE = engine POPULATE AS SELECT * FROM city"]
          (-> (h/create-materialized-view
                :table-name
@@ -273,6 +273,10 @@
           (-> (h/alter-user :user)
               (h/default-role :role :all-except)
               (format {:dialect :clickhouse}))))
+  (is (=  ["ALTER USER user SET DEFAULT ROLE ALL role"]
+          (-> (h/alter-user :user)
+              (h/default-role :set :role :all)
+              (format {:dialect :clickhouse}))))
   (is (=  ["ALTER QUOTA IF EXISTS quota"]
           (-> (h/alter-quota :if-exists :quota)
               (format {:dialect :clickhouse}))))
@@ -306,9 +310,7 @@
   (is (=  ["EXPLAIN AST SETTING1 = value, SETTING2 = value SELECT * FROM table FORMAT csv"]
           (-> (h/explain
                 :ast
-                {:settings {:raw [(str (sut/format-assignable-clauses {:setting1 :value} {:spacing " = "})
-                                       ", "
-                                       (sut/format-assignable-clauses {:setting2 :value} {:spacing " = "}))]}
+                {:settings {:raw ["SETTING1 = value, SETTING2 = value"]}
                  :data     (-> (h/select :*)
                                (h/from :table))
                  :more     (h/clickhouse-format :csv)})
@@ -352,6 +354,18 @@
               (format {:dialect :clickhouse}))))
   (is (=  ["DETACH DICTIONARY IF EXISTS db.name ON CLUSTER cluster"]
           (-> (h/detach :dictionary :if-exists :db.name (h/on-cluster :cluster))
+              (format {:dialect :clickhouse}))))
+  (is (=  ["EXISTS TEMPORARY DICTIONARY db.name ON CLUSTER cluster"]
+          (-> (h/exists :temporary :dictionary :db.name (h/on-cluster :cluster))
+              (format {:dialect :clickhouse}))))
+  (is (=  ["EXISTS TABLE db.name"]
+          (-> (h/exists :table :db.name)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["TRUNCATE TABLE IF EXISTS table"]
+          (-> (h/truncate-if-exists :if-exists :table)
+              (format {:dialect :clickhouse}))))
+  (is (=  ["RENAME DICTIONARY prev TO after"]
+          (-> (h/rename-type :dictionary :prev :after)
               (format {:dialect :clickhouse})))))
 
 (deftest expr-tests
